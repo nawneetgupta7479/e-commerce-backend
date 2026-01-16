@@ -70,8 +70,10 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
     paymentResult: {
-      id: String,
-      status: String,
+      id: { type: String }, // Stripe payment intent ID
+      status: { type: String },
+      receiptUrl: { type: String, default: null }, // Stripe receipt URL
+      receiptNumber: { type: String, default: null }, // Stripe receipt number
     },
     totalPrice: {
       type: Number,

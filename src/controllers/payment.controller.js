@@ -105,6 +105,7 @@ export async function handleWebhook(req, res) {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  // Handle payment_intent.succeeded - Create Order
   if (event.type === "payment_intent.succeeded") {
     const paymentIntent = event.data.object;
 
@@ -129,6 +130,7 @@ export async function handleWebhook(req, res) {
         paymentResult: {
           id: paymentIntent.id,
           status: "succeeded",
+          receiptUrl: null, // Will be updated when charge.succeeded fires
         },
         totalPrice: parseFloat(totalPrice),
       });
@@ -147,6 +149,68 @@ export async function handleWebhook(req, res) {
     }
   }
 
+  // Handle charge.succeeded - Capture Receipt URL
+  if (event.type === "charge.succeeded") {
+    const charge = event.data.object;
+
+    console.log("Charge succeeded:", charge.id);
+    console.log("Receipt URL:", charge.receipt_url);
+
+    try {
+      const paymentIntentId = charge.payment_intent;
+
+      if (paymentIntentId && charge.receipt_url) {
+        // Update the order with the receipt URL
+        const updatedOrder = await Order.findOneAndUpdate(
+          { "paymentResult.id": paymentIntentId },
+          { 
+            "paymentResult.receiptUrl": charge.receipt_url,
+            "paymentResult.receiptNumber": charge.receipt_number,
+          },
+          { new: true }
+        );
+
+        if (updatedOrder) {
+          console.log("Order updated with receipt URL:", updatedOrder._id);
+          console.log("Receipt URL saved:", charge.receipt_url);
+        } else {
+          console.log("Order not found for payment intent:", paymentIntentId);
+        }
+      }
+    } catch (error) {
+      console.error("Error updating order with receipt URL:", error);
+    }
+  }
+
+  // Handle charge.updated - Update Receipt URL if changed
+  if (event.type === "charge.updated") {
+    const charge = event.data.object;
+
+    console.log("Charge updated:", charge.id);
+
+    try {
+      const paymentIntentId = charge.payment_intent;
+
+      if (paymentIntentId && charge.receipt_url) {
+        // Update the order with the latest receipt URL
+        const updatedOrder = await Order.findOneAndUpdate(
+          { "paymentResult.id": paymentIntentId },
+          { 
+            "paymentResult.receiptUrl": charge.receipt_url,
+            "paymentResult.receiptNumber": charge.receipt_number,
+          },
+          { new: true }
+        );
+
+        if (updatedOrder) {
+          console.log("Order receipt URL updated:", updatedOrder._id);
+        }
+      }
+    } catch (error) {
+      console.error("Error updating order receipt URL:", error);
+    }
+  }
+
   res.json({ received: true });
 }
 
@@ -156,38 +220,37 @@ export async function getUserPayments(req, res) {
 
     // Check if user has a Stripe customer ID
     if (!user.stripeCustomerId) {
-      return res.status(200).json({ payments: [] });
+      return res.status(200).json({ success: true, count: 0, payments: [] });
     }
 
-    // Fetch all successful payment intents for this customer
-    const paymentIntents = await stripe.paymentIntents.list({
+    // Fetch all charges for this customer (charges contain receipt_url)
+    const charges = await stripe.charges.list({
       customer: user.stripeCustomerId,
-      limit: 100, // Adjust as needed
+      limit: 100,
     });
 
-    // Filter only succeeded payments and format the data
-    const successfulPayments = paymentIntents.data
-      .filter((pi) => pi.status === "succeeded")
-      .map((pi) => {
-        // Get the charge object to access receipt_url
-        const charge = pi.charges?.data?.[0];
-
+    // Filter only succeeded charges and format the data
+    const successfulPayments = charges.data
+      .filter((charge) => charge.status === "succeeded" && charge.paid === true)
+      .map((charge) => {
         return {
-          id: pi.id,
-          amount: pi.amount / 100, // Convert from cents to dollars
-          currency: pi.currency.toUpperCase(),
-          status: pi.status,
-          created: new Date(pi.created * 1000), // Convert timestamp to date
-          description: pi.description || "Order Payment",
-          receiptUrl: charge?.receipt_url || null,
-          receiptNumber: charge?.receipt_number || null,
-          paymentMethod: pi.payment_method_types?.[0] || "card",
-          metadata: pi.metadata || {},
+          id: charge.id,
+          paymentIntentId: charge.payment_intent,
+          amount: charge.amount / 100, // Convert from cents to dollars
+          currency: charge.currency.toUpperCase(),
+          status: charge.status,
+          created: new Date(charge.created * 1000), // Convert timestamp to date
+          description: charge.description || "Order Payment",
+          receiptUrl: charge.receipt_url || null,
+          receiptNumber: charge.receipt_number || null,
+          paymentMethod: charge.payment_method_details?.type || "card",
+          metadata: charge.metadata || {},
+          billingDetails: charge.billing_details || {},
         };
       });
 
     // Console log the payments for debugging
-    console.log("=== User Successful Payments ===");
+    console.log("\n=== User Successful Payments ===");
     console.log("User ID:", user._id);
     console.log("Clerk ID:", user.clerkId);
     console.log("Stripe Customer ID:", user.stripeCustomerId);
@@ -195,14 +258,14 @@ export async function getUserPayments(req, res) {
     console.log("\nPayment Details:");
     successfulPayments.forEach((payment, index) => {
       console.log(`\n--- Payment ${index + 1} ---`);
-      console.log("Payment ID:", payment.id);
+      console.log("Charge ID:", payment.id);
+      console.log("Payment Intent ID:", payment.paymentIntentId);
       console.log("Amount:", `$${payment.amount.toFixed(2)} ${payment.currency}`);
       console.log("Status:", payment.status);
       console.log("Date:", payment.created.toISOString());
       console.log("Receipt URL:", payment.receiptUrl || "Not available");
       console.log("Receipt Number:", payment.receiptNumber || "Not available");
       console.log("Payment Method:", payment.paymentMethod);
-      console.log("Metadata:", JSON.stringify(payment.metadata, null, 2));
     });
     console.log("\n=================================\n");
 
