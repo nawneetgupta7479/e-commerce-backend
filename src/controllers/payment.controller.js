@@ -149,3 +149,70 @@ export async function handleWebhook(req, res) {
 
   res.json({ received: true });
 }
+
+export async function getUserPayments(req, res) {
+  try {
+    const user = req.user;
+
+    // Check if user has a Stripe customer ID
+    if (!user.stripeCustomerId) {
+      return res.status(200).json({ payments: [] });
+    }
+
+    // Fetch all successful payment intents for this customer
+    const paymentIntents = await stripe.paymentIntents.list({
+      customer: user.stripeCustomerId,
+      limit: 100, // Adjust as needed
+    });
+
+    // Filter only succeeded payments and format the data
+    const successfulPayments = paymentIntents.data
+      .filter((pi) => pi.status === "succeeded")
+      .map((pi) => {
+        // Get the charge object to access receipt_url
+        const charge = pi.charges?.data?.[0];
+
+        return {
+          id: pi.id,
+          amount: pi.amount / 100, // Convert from cents to dollars
+          currency: pi.currency.toUpperCase(),
+          status: pi.status,
+          created: new Date(pi.created * 1000), // Convert timestamp to date
+          description: pi.description || "Order Payment",
+          receiptUrl: charge?.receipt_url || null,
+          receiptNumber: charge?.receipt_number || null,
+          paymentMethod: pi.payment_method_types?.[0] || "card",
+          metadata: pi.metadata || {},
+        };
+      });
+
+    // Console log the payments for debugging
+    console.log("=== User Successful Payments ===");
+    console.log("User ID:", user._id);
+    console.log("Clerk ID:", user.clerkId);
+    console.log("Stripe Customer ID:", user.stripeCustomerId);
+    console.log("Total Successful Payments:", successfulPayments.length);
+    console.log("\nPayment Details:");
+    successfulPayments.forEach((payment, index) => {
+      console.log(`\n--- Payment ${index + 1} ---`);
+      console.log("Payment ID:", payment.id);
+      console.log("Amount:", `$${payment.amount.toFixed(2)} ${payment.currency}`);
+      console.log("Status:", payment.status);
+      console.log("Date:", payment.created.toISOString());
+      console.log("Receipt URL:", payment.receiptUrl || "Not available");
+      console.log("Receipt Number:", payment.receiptNumber || "Not available");
+      console.log("Payment Method:", payment.paymentMethod);
+      console.log("Metadata:", JSON.stringify(payment.metadata, null, 2));
+    });
+    console.log("\n=================================\n");
+
+    res.status(200).json({
+      success: true,
+      count: successfulPayments.length,
+      payments: successfulPayments,
+    });
+  } catch (error) {
+    console.error("Error fetching user payments:", error);
+    res.status(500).json({ error: "Failed to fetch payments" });
+  }
+}
