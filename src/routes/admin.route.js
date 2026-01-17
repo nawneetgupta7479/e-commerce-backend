@@ -3,6 +3,7 @@ import {
   createProduct,
   getAllCustomers,
   getAllOrders,
+  getOrderById,
   getAllProducts,
   getDashboardStats,
   updateOrderStatus,
@@ -23,6 +24,7 @@ router.put("/products/:id", upload.array("images", 3), updateProduct);
 router.delete("/products/:id", deleteProduct);
 
 router.get("/orders", getAllOrders);
+router.get("/orders/:orderId", getOrderById);
 router.patch("/orders/:orderId/status", updateOrderStatus);
 
 router.get("/customers", getAllCustomers);

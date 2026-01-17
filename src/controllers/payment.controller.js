@@ -4,6 +4,8 @@ import { User } from "../models/user.model.js";
 import { Product } from "../models/product.model.js";
 import { Order } from "../models/order.model.js";
 import { Cart } from "../models/cart.model.js";
+import { sendEmail } from "../config/nodemailer.js";
+import { orderCreatedUserTemplate } from "../lib/emailTemplates.js";
 
 const stripe = new Stripe(ENV.STRIPE_SECRET_KEY);
 
@@ -121,6 +123,9 @@ export async function handleWebhook(req, res) {
         return res.json({ received: true });
       }
 
+      // Get user email
+      const user = await User.findById(userId);
+
       // create order
       const order = await Order.create({
         user: userId,
@@ -130,7 +135,7 @@ export async function handleWebhook(req, res) {
         paymentResult: {
           id: paymentIntent.id,
           status: "succeeded",
-          receiptUrl: null, // Will be updated when charge.succeeded fires
+          receiptUrl: null,
         },
         totalPrice: parseFloat(totalPrice),
       });
@@ -144,6 +149,29 @@ export async function handleWebhook(req, res) {
       }
 
       console.log("Order created successfully:", order._id);
+
+      // Send order confirmation email to user
+      if (user?.email) {
+        setImmediate(async () => {
+          try {
+            const emailTemplate = orderCreatedUserTemplate(order);
+            const result = await sendEmail({
+              from: `"ShopKart" <${ENV.EMAIL_USER}>`,
+              to: user.email,
+              subject: emailTemplate.subject,
+              html: emailTemplate.html,
+            });
+
+            if (result.success) {
+              console.log(`✅ Order confirmation email sent to: ${user.email}`);
+            } else {
+              console.log(`❌ Failed to send order confirmation email: ${result.error}`);
+            }
+          } catch (emailError) {
+            console.error("❌ Email error:", emailError.message);
+          }
+        });
+      }
     } catch (error) {
       console.error("Error creating order from webhook:", error);
     }

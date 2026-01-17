@@ -2,6 +2,9 @@ import cloudinary from "../config/cloudinary.js";
 import { Product } from "../models/product.model.js";
 import { Order } from "../models/order.model.js";
 import { User } from "../models/user.model.js";
+import { sendEmail } from "../config/nodemailer.js";
+import { ENV } from "../config/env.js";
+import { orderStatusUpdatedUserTemplate } from "../lib/emailTemplates.js";
 
 export async function createProduct(req, res) {
   try {
@@ -96,9 +99,17 @@ export async function updateProduct(req, res) {
   }
 }
 
-export async function getAllOrders(_, res) {
+export async function getAllOrders(req, res) {
   try {
-    const orders = await Order.find()
+    const { status } = req.query;
+
+    // Build filter
+    const filter = {};
+    if (status && ["pending", "shipped", "delivered"].includes(status)) {
+      filter.status = status;
+    }
+
+    const orders = await Order.find(filter)
       .populate("user", "name email")
       .populate("orderItems.product")
       .sort({ createdAt: -1 });
@@ -106,6 +117,25 @@ export async function getAllOrders(_, res) {
     res.status(200).json({ orders });
   } catch (error) {
     console.error("Error in getAllOrders controller:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function getOrderById(req, res) {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findById(orderId)
+      .populate("user", "name email imageUrl")
+      .populate("orderItems.product");
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    res.status(200).json({ order });
+  } catch (error) {
+    console.error("Error in getOrderById controller:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -119,11 +149,12 @@ export async function updateOrderStatus(req, res) {
       return res.status(400).json({ error: "Invalid status" });
     }
 
-    const order = await Order.findById(orderId);
+    const order = await Order.findById(orderId).populate("user", "name email");
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
 
+    const previousStatus = order.status;
     order.status = status;
 
     if (status === "shipped" && !order.shippedAt) {
@@ -135,6 +166,35 @@ export async function updateOrderStatus(req, res) {
     }
 
     await order.save();
+
+    console.log(`\n=== Order Status Updated ===`);
+    console.log(`Order ID: ${order._id}`);
+    console.log(`Previous Status: ${previousStatus}`);
+    console.log(`New Status: ${status}`);
+    console.log(`============================\n`);
+
+    // Send email notification to user if status changed
+    if (previousStatus !== status && order.user?.email) {
+      setImmediate(async () => {
+        try {
+          const emailTemplate = orderStatusUpdatedUserTemplate(order, status);
+          const result = await sendEmail({
+            from: `"ShopKart" <${ENV.EMAIL_USER}>`,
+            to: order.user.email,
+            subject: emailTemplate.subject,
+            html: emailTemplate.html,
+          });
+
+          if (result.success) {
+            console.log(`✅ Order status email sent to: ${order.user.email}`);
+          } else {
+            console.log(`❌ Failed to send order status email: ${result.error}`);
+          }
+        } catch (emailError) {
+          console.error("❌ Email error:", emailError.message);
+        }
+      });
+    }
 
     res.status(200).json({ message: "Order status updated successfully", order });
   } catch (error) {
