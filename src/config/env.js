@@ -19,4 +19,5 @@ export const ENV = {
   API_URL: process.env.API_URL,
     EMAIL_USER: process.env.EMAIL_USER,
   EMAIL_PASS: process.env.EMAIL_PASS,
+
 };
