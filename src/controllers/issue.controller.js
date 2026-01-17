@@ -1,5 +1,5 @@
 import { Issue } from "../models/issue.model.js";
-import transporter from "../config/nodemailer.js";
+import { sendEmail } from "../config/nodemailer.js";
 import { ENV } from "../config/env.js";
 import {
   issueCreatedUserTemplate,
@@ -35,33 +35,38 @@ export async function createIssue(req, res) {
     console.log("User:", userName);
     console.log("=========================\n");
 
-    // Send confirmation email to user
-    try {
+    // Send emails asynchronously (don't block the response)
+    setImmediate(async () => {
+      // Send confirmation email to user
       const userEmailTemplate = issueCreatedUserTemplate(issue);
-      await transporter.sendMail({
+      const userResult = await sendEmail({
         from: `"ShopKart Support" <${ENV.EMAIL_USER}>`,
         to: userEmail,
         subject: userEmailTemplate.subject,
         html: userEmailTemplate.html,
       });
-      console.log("✅ Email sent to user:", userEmail);
-    } catch (emailError) {
-      console.error("❌ Failed to send user email:", emailError.message);
-    }
 
-    // Send notification email to admin
-    try {
+      if (userResult.success) {
+        console.log("✅ Email sent to user:", userEmail);
+      } else {
+        console.log("❌ Failed to send user email:", userResult.error);
+      }
+
+      // Send notification email to admin
       const adminEmailTemplate = issueCreatedAdminTemplate(issue);
-      await transporter.sendMail({
+      const adminResult = await sendEmail({
         from: `"ShopKart System" <${ENV.EMAIL_USER}>`,
         to: ENV.ADMIN_EMAIL,
         subject: adminEmailTemplate.subject,
         html: adminEmailTemplate.html,
       });
-      console.log("✅ Email sent to admin:", ENV.ADMIN_EMAIL);
-    } catch (emailError) {
-      console.error("❌ Failed to send admin email:", emailError.message);
-    }
+
+      if (adminResult.success) {
+        console.log("✅ Email sent to admin:", ENV.ADMIN_EMAIL);
+      } else {
+        console.log("❌ Failed to send admin email:", adminResult.error);
+      }
+    });
 
     res.status(201).json({
       success: true,
@@ -138,19 +143,22 @@ export async function markIssueResolved(req, res) {
     console.log("Ticket:", issue.ticketNumber);
     console.log("======================\n");
 
-    // Send resolution email to user
-    try {
+    // Send resolution email asynchronously
+    setImmediate(async () => {
       const resolvedEmailTemplate = issueResolvedUserTemplate(issue);
-      await transporter.sendMail({
+      const result = await sendEmail({
         from: `"ShopKart Support" <${ENV.EMAIL_USER}>`,
         to: issue.userEmail,
         subject: resolvedEmailTemplate.subject,
         html: resolvedEmailTemplate.html,
       });
-      console.log("✅ Resolution email sent to user:", issue.userEmail);
-    } catch (emailError) {
-      console.error("❌ Failed to send resolution email:", emailError.message);
-    }
+
+      if (result.success) {
+        console.log("✅ Resolution email sent to user:", issue.userEmail);
+      } else {
+        console.log("❌ Failed to send resolution email:", result.error);
+      }
+    });
 
     res.status(200).json({
       success: true,
