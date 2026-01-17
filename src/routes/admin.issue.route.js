@@ -1,14 +1,15 @@
 import { Router } from "express";
-import { protectAdminRoute } from "../middleware/auth.middleware.js";
 import {
   getAllIssues,
   getIssueById,
   markIssueResolved,
 } from "../controllers/issue.controller.js";
 
+import { adminOnly, protectRoute } from "../middleware/auth.middleware.js";
 const router = Router();
 
-router.use(protectAdminRoute);
+
+router.use(protectRoute, adminOnly);
 
 // Admin routes
 router.get("/", getAllIssues);
